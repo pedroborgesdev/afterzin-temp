@@ -1,0 +1,345 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 99%;
+    --foreground: 240 10% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 8%;
+
+  /* #FF4CCA */
+  --primary: 320 100% 65%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 320 100% 96%;
+  --secondary-foreground: 320 100% 45%;
+
+  --muted: 240 5% 95%;
+  --muted-foreground: 240 5% 40%;
+
+  --accent: 320 100% 95%;
+  --accent-foreground: 320 100% 45%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 240 6% 88%;
+  --input: 240 6% 88%;
+  --ring: 320 100% 65%;
+
+  --radius: 0.625rem;
+
+  /* Custom tokens - enhanced contrast */
+  --pink-glow: 320 100% 72%;
+  --gradient-primary: linear-gradient(135deg, hsl(320, 100%, 65%), hsl(320, 100%, 72%));
+  --gradient-hero: linear-gradient(180deg, hsl(320, 100%, 98%) 0%, hsl(0, 0%, 99%) 100%);
+  --gradient-card: linear-gradient(145deg, hsl(0, 0%, 100%) 0%, hsl(320, 100%, 99%) 100%);
+  --shadow-soft: 0 2px 12px -2px hsl(320 100% 65% / 0.12);
+  --shadow-card: 0 4px 20px -4px hsl(240 10% 10% / 0.06);
+  --shadow-elevated: 0 12px 32px -8px hsl(320 100% 65% / 0.18);
+
+  /* Safe area insets for mobile */
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
+
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 320 100% 65%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 320 100% 96%;
+  --sidebar-accent-foreground: 320 100% 45%;
+  --sidebar-border: 240 6% 88%;
+  --sidebar-ring: 320 100% 65%;
+  }
+
+  .dark {
+    --background: 240 10% 5%;
+    --foreground: 0 0% 96%;
+
+    --card: 240 10% 7%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 240 10% 7%;
+    --popover-foreground: 0 0% 96%;
+
+  /* #FF4CCA */
+  --primary: 320 100% 65%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 320 100% 22%;
+  --secondary-foreground: 320 100% 82%;
+
+  --muted: 240 10% 12%;
+  --muted-foreground: 240 5% 60%;
+
+  --accent: 320 100% 22%;
+  --accent-foreground: 320 100% 82%;
+
+  --destructive: 0 62% 40%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 240 10% 14%;
+  --input: 240 10% 14%;
+  --ring: 320 100% 65%;
+
+  --sidebar-background: 240 10% 7%;
+  --sidebar-foreground: 0 0% 90%;
+  --sidebar-primary: 320 100% 65%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 320 100% 22%;
+  --sidebar-accent-foreground: 320 100% 82%;
+  --sidebar-border: 240 10% 14%;
+  --sidebar-ring: 320 100% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    @apply tracking-tight;
+  }
+
+  /* Improve touch targets */
+  button, a, [role="button"] {
+    @apply touch-manipulation;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-primary);
+  }
+
+  .bg-gradient-primary {
+    background-image: var(--gradient-primary);
+  }
+
+  .bg-gradient-hero {
+    background-image: var(--gradient-hero);
+  }
+
+  .bg-gradient-card {
+    background-image: var(--gradient-card);
+  }
+
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-elevated {
+    box-shadow: var(--shadow-elevated);
+  }
+
+  /* Mobile-first container with safe padding */
+  .container-safe {
+    @apply w-full mx-auto;
+    padding-left: max(1rem, var(--safe-left));
+    padding-right: max(1rem, var(--safe-right));
+  }
+
+  @screen sm {
+    .container-safe {
+      @apply px-6;
+    }
+  }
+
+  @screen lg {
+    .container-safe {
+      @apply px-8;
+    }
+  }
+
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.4s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.25s ease-out;
+  }
+
+  .animate-slide-up-mobile {
+    animation: slideUpMobile 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* Touch-friendly hover states */
+  .hover-lift {
+    @apply transition-all duration-200;
+  }
+
+  @media (hover: hover) {
+    .hover-lift:hover {
+      @apply -translate-y-0.5;
+      box-shadow: var(--shadow-elevated);
+    }
+  }
+
+  .hover-lift:active {
+    @apply scale-[0.98];
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply backdrop-blur-xl border border-border/50;
+    background: hsl(var(--background) / 0.85);
+  }
+
+  /* Safe bottom for fixed elements */
+  .pb-safe {
+    padding-bottom: max(1rem, var(--safe-bottom));
+  }
+
+  .mb-safe {
+    margin-bottom: max(1rem, var(--safe-bottom));
+  }
+
+  /* Focus visible styles for accessibility */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Snap scroll for carousels */
+  .snap-x-mandatory {
+    scroll-snap-type: x mandatory;
+  }
+
+  .snap-start {
+    scroll-snap-align: start;
+  }
+
+  /* Touch-action for better scrolling */
+  .touch-pan-x {
+    touch-action: pan-x;
+  }
+
+  .touch-pan-y {
+    touch-action: pan-y;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideUpMobile {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Custom scrollbar for desktop */
+@media (hover: hover) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
+}
+
+/* Bottom sheet styles */
+[data-vaul-drawer] {
+  @apply fixed inset-x-0 bottom-0 z-50;
+}
+
+[data-vaul-drawer-content] {
+  @apply bg-card rounded-t-2xl;
+  max-height: 92vh;
+  max-height: 92dvh;
+}
+
+/* Modal improvements for mobile */
+@media (max-width: 640px) {
+  [role="dialog"] {
+    @apply !rounded-t-2xl !rounded-b-none;
+    max-height: 90vh !important;
+    max-height: 90dvh !important;
+  }
+}
