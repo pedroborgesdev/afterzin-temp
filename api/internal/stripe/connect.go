@@ -76,7 +76,7 @@ func (c *Client) CreateAccountLink(accountID, refreshURL, returnURL string) (str
 		"use_case": map[string]interface{}{
 			"type": "account_onboarding",
 			"account_onboarding": map[string]interface{}{
-				"configurations": []string{"recipient"},
+				"configurations": []string{"recipient", "merchant"},
 				"refresh_url":    refreshURL,
 				"return_url":     returnURL,
 			},
