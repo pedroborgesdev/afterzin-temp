@@ -113,6 +113,16 @@ func SetOrderStripePaymentIntentID(db *sql.DB, orderID, paymentIntentID string) 
 	return err
 }
 
+// GetOrderStripePaymentIntentID retrieves the Stripe Payment Intent ID for an order.
+func GetOrderStripePaymentIntentID(db *sql.DB, orderID string) (string, error) {
+	var piID sql.NullString
+	err := db.QueryRow(`SELECT stripe_payment_intent_id FROM orders WHERE id = ?`, orderID).Scan(&piID)
+	if err != nil {
+		return "", err
+	}
+	return piID.String, nil
+}
+
 // OrderByStripeSessionID finds an order by its Stripe Checkout Session ID.
 func OrderByStripeSessionID(db *sql.DB, sessionID string) (orderID string, err error) {
 	err = db.QueryRow(`SELECT id FROM orders WHERE stripe_checkout_session_id = ?`, sessionID).Scan(&orderID)

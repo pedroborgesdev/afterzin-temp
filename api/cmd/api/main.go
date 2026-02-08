@@ -59,15 +59,13 @@ func main() {
 		mux.HandleFunc("/api/stripe/connect/onboarding-link", stripeHandler.CreateOnboardingLink)
 		mux.HandleFunc("/api/stripe/connect/status", stripeHandler.GetStatus)
 		mux.HandleFunc("/api/stripe/connect/pix-key", stripeHandler.UpdatePixKey)
-		mux.HandleFunc("/api/stripe/checkout/create", stripeHandler.CreateCheckoutSession)
+		mux.HandleFunc("/api/stripe/payment/create", stripeHandler.CreatePayment)
+		mux.HandleFunc("/api/stripe/payment/status", stripeHandler.GetPaymentStatus)
 		mux.HandleFunc("/api/stripe/webhook", stripeHandler.HandleWebhook)
-		log.Println("Stripe endpoints registered (Connect + Checkout + Webhook)")
+		log.Println("Stripe endpoints registered (Connect + PIX Payment + Webhook)")
 	} else {
 		log.Println("STRIPE_SECRET_KEY not set — Stripe endpoints disabled")
 	}
-
-	fmt.Println(cfg.StripeSecretKey)
-	fmt.Println(cfg.StripeWebhookSecret)
 
 	handler := middleware.CORS(cfg.CORSOrigins)(middleware.Auth(cfg.JWTSecret)(mux))
 

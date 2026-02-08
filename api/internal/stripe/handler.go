@@ -263,11 +263,12 @@ func (h *Handler) UpdatePixKey(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"message": "chave PIX atualizada"})
 }
 
-// ---------- Checkout ----------
+// ---------- Payment: PIX PaymentIntent ----------
 
-// CreateCheckoutSession handles POST /api/stripe/checkout/create
-// Creates a Stripe Checkout Session for an existing order, with PIX + destination charges.
-func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
+// CreatePayment handles POST /api/stripe/payment/create
+// Creates a Stripe PaymentIntent with PIX for an existing order.
+// Returns QR code + copia-e-cola for the customer to pay.
+func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -306,6 +307,18 @@ func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if order already has a payment intent (avoid duplicate charges)
+	existingPI, _ := repository.GetOrderStripePaymentIntentID(h.db, req.OrderID)
+	if existingPI != "" {
+		// Return existing PI status
+		piStatus, err := h.client.GetPaymentIntentStatus(existingPI)
+		if err == nil && piStatus.Status != "canceled" {
+			respondJSON(w, http.StatusOK, piStatus)
+			return
+		}
+		// If cancelled or errored, allow creating a new one
+	}
+
 	// Get order items
 	items, err := repository.OrderItemsByOrderID(h.db, req.OrderID)
 	if err != nil || len(items) == 0 {
@@ -313,10 +326,11 @@ func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Build checkout line items and resolve connected account
+	// Calculate total amount and resolve connected account
 	var connectedAccountID string
+	var totalCentavos int64
 	var totalTickets int
-	var lineItems []CheckoutLineItem
+	var eventTitle string
 
 	for _, item := range items {
 		totalTickets += item.Quantity
@@ -326,6 +340,7 @@ func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			respondError(w, http.StatusBadRequest, "tipo de ingresso não encontrado")
 			return
 		}
+		totalCentavos += int64(tt.Price*100) * int64(item.Quantity)
 
 		// Resolve event → producer → stripe account
 		ed, _ := repository.EventDateByID(h.db, item.EventDateID)
@@ -338,8 +353,10 @@ func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			respondError(w, http.StatusBadRequest, "evento não encontrado")
 			return
 		}
+		if eventTitle == "" {
+			eventTitle = ev.Title
+		}
 
-		// Get producer's Stripe connected account
 		if connectedAccountID == "" {
 			acctID, _ := repository.GetProducerStripeAccountID(h.db, ev.ProducerID)
 			if acctID == "" {
@@ -348,56 +365,99 @@ func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			}
 			connectedAccountID = acctID
 		}
-
-		// Ensure ticket type has a Stripe price (create lazily if needed)
-		priceID, _ := repository.GetTicketTypeStripePriceID(h.db, tt.ID)
-		if priceID == "" {
-			productName := fmt.Sprintf("%s - %s", tt.Name, ev.Title)
-			desc := ""
-			if tt.Description.Valid {
-				desc = tt.Description.String
-			}
-			amountCentavos := int64(tt.Price * 100)
-			result, err := h.client.CreateProductWithPrice(productName, desc, amountCentavos)
-			if err != nil {
-				log.Printf("stripe: create product/price error: %v", err)
-				respondError(w, http.StatusInternalServerError, "erro ao criar produto Stripe")
-				return
-			}
-			if err := repository.SetTicketTypeStripeIDs(h.db, tt.ID, result.ProductID, result.PriceID); err != nil {
-				log.Printf("stripe: save product ids error: %v", err)
-			}
-			priceID = result.PriceID
-		}
-
-		lineItems = append(lineItems, CheckoutLineItem{
-			PriceID:  priceID,
-			Quantity: item.Quantity,
-		})
 	}
 
-	// Create the Stripe Checkout Session
-	successURL := h.client.BaseURL + "/checkout/sucesso?session_id={CHECKOUT_SESSION_ID}"
-	cancelURL := h.client.BaseURL + "/checkout/cancelado"
-
-	session, err := h.client.CreateCheckoutSession(CheckoutParams{
+	// Create PIX PaymentIntent via Stripe V1
+	pixResult, err := h.client.CreatePixPaymentIntent(PixPaymentParams{
 		OrderID:            req.OrderID,
 		ConnectedAccountID: connectedAccountID,
-		LineItems:          lineItems,
+		AmountCentavos:     totalCentavos,
 		TotalTickets:       totalTickets,
-		SuccessURL:         successURL,
-		CancelURL:          cancelURL,
+		Description:        fmt.Sprintf("Afterzin - %s", eventTitle),
 	})
 	if err != nil {
-		log.Printf("stripe: create checkout session error: %v", err)
-		respondError(w, http.StatusInternalServerError, "erro ao criar sessão de checkout: "+err.Error())
+		log.Printf("stripe: create pix payment intent error: %v", err)
+		respondError(w, http.StatusInternalServerError, "erro ao criar pagamento PIX: "+err.Error())
 		return
 	}
 
-	// Link session to order
-	repository.SetOrderStripeSessionID(h.db, req.OrderID, session.SessionID)
+	// Persist payment intent on order
+	repository.SetOrderStripePaymentIntentID(h.db, req.OrderID, pixResult.PaymentIntentID)
 
-	respondJSON(w, http.StatusOK, session)
+	log.Printf("stripe: PIX payment created for order %s (pi: %s, amount: %d, fee: %d×%d)",
+		req.OrderID, pixResult.PaymentIntentID, totalCentavos,
+		h.client.ApplicationFee, totalTickets)
+
+	respondJSON(w, http.StatusOK, pixResult)
+}
+
+// GetPaymentStatus handles GET /api/stripe/payment/status?orderId=xxx
+// Frontend polls this to check if PIX was paid.
+func (h *Handler) GetPaymentStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	userID := middleware.UserID(r.Context())
+	if userID == "" {
+		respondError(w, http.StatusUnauthorized, "não autenticado")
+		return
+	}
+
+	orderID := r.URL.Query().Get("orderId")
+	if orderID == "" {
+		respondError(w, http.StatusBadRequest, "orderId é obrigatório")
+		return
+	}
+
+	// Verify order ownership
+	orderUserID, orderStatus, _, err := repository.OrderByID(h.db, orderID)
+	if err != nil || orderUserID == "" {
+		respondError(w, http.StatusNotFound, "pedido não encontrado")
+		return
+	}
+	if orderUserID != userID {
+		respondError(w, http.StatusForbidden, "pedido não pertence ao usuário")
+		return
+	}
+
+	// If order is already confirmed, return immediately
+	if orderStatus == "CONFIRMED" || orderStatus == "PAID" {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "succeeded",
+			"orderStatus": orderStatus,
+			"paid":        true,
+		})
+		return
+	}
+
+	// Get PI from order and check Stripe
+	piID, _ := repository.GetOrderStripePaymentIntentID(h.db, orderID)
+	if piID == "" {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "no_payment",
+			"paid":   false,
+		})
+		return
+	}
+
+	piStatus, err := h.client.GetPaymentIntentStatus(piID)
+	if err != nil {
+		log.Printf("stripe: get PI status error: %v", err)
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "unknown",
+			"paid":   false,
+			"error":  "não foi possível verificar status",
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          piStatus.Status,
+		"paymentIntentId": piStatus.PaymentIntentID,
+		"paid":            piStatus.Status == "succeeded",
+	})
 }
 
 // ---------- Webhooks ----------
@@ -406,8 +466,8 @@ func (h *Handler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) 
 // Verifies signature, deduplicates, and processes Stripe events.
 //
 // Handled events:
-//   - checkout.session.completed → confirms order, creates tickets
-//   - payment_intent.succeeded  → secondary confirmation logging
+//   - payment_intent.succeeded → PRIMARY: confirms order, creates tickets, generates QR codes
+//   - checkout.session.completed → ignored (legacy, kept for compat)
 func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -444,8 +504,6 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Route by event type
 	switch event.Type {
-	case "checkout.session.completed":
-		h.handleCheckoutCompleted(event)
 	case "payment_intent.succeeded":
 		h.handlePaymentIntentSucceeded(event)
 	default:
@@ -458,54 +516,51 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleCheckoutCompleted processes checkout.session.completed:
-//  1. Fetches full session from Stripe (thin event pattern)
-//  2. Extracts order_id from metadata
-//  3. Creates tickets with signed QR codes
-//  4. Marks order as PAID
-func (h *Handler) handleCheckoutCompleted(event *WebhookEvent) {
+// handlePaymentIntentSucceeded processes payment_intent.succeeded:
+//  1. Extract PaymentIntent ID from event data
+//  2. Fetch full PaymentIntent from Stripe (thin event pattern)
+//  3. Extract order_id from metadata
+//  4. Create tickets with signed QR codes (V2 with payment traceability)
+//  5. Mark order as CONFIRMED
+func (h *Handler) handlePaymentIntentSucceeded(event *WebhookEvent) {
 	data := event.Data
 	if data == nil {
-		log.Printf("stripe: checkout.session.completed - no data")
+		log.Printf("stripe: payment_intent.succeeded - no data")
 		return
 	}
 
 	obj, ok := data["object"].(map[string]interface{})
 	if !ok {
-		log.Printf("stripe: checkout.session.completed - no object in data")
+		log.Printf("stripe: payment_intent.succeeded - no object in data")
 		return
 	}
 
-	sessionID, _ := obj["id"].(string)
-	if sessionID == "" {
-		log.Printf("stripe: checkout.session.completed - no session id")
+	piID, _ := obj["id"].(string)
+	if piID == "" {
+		log.Printf("stripe: payment_intent.succeeded - no payment intent id")
 		return
 	}
 
-	// Fetch full session from Stripe (thin events only contain minimal data)
-	session, err := h.client.RetrieveCheckoutSession(sessionID)
+	// Fetch full PaymentIntent from Stripe (webhook may send thin data)
+	pi, err := h.client.RetrievePaymentIntent(piID)
 	if err != nil {
-		log.Printf("stripe: retrieve session %s error: %v", sessionID, err)
-		return
+		log.Printf("stripe: retrieve PI %s error: %v", piID, err)
+		// Try with event data as fallback
+		pi = obj
 	}
 
-	// Extract order_id from session metadata
-	metadata, _ := session["metadata"].(map[string]interface{})
+	// Extract order_id from metadata
+	metadata, _ := pi["metadata"].(map[string]interface{})
 	orderID, _ := metadata["order_id"].(string)
 	if orderID == "" {
-		log.Printf("stripe: checkout completed but no order_id in metadata (session %s)", sessionID)
+		log.Printf("stripe: payment_intent.succeeded but no order_id in metadata (pi %s)", piID)
 		return
 	}
 
-	// Extract payment intent ID
-	paymentIntentID, _ := session["payment_intent"].(string)
-
 	// Save payment intent to order
-	if paymentIntentID != "" {
-		repository.SetOrderStripePaymentIntentID(h.db, orderID, paymentIntentID)
-	}
+	repository.SetOrderStripePaymentIntentID(h.db, orderID, piID)
 
-	// Verify order is still pending
+	// Verify order is still pending (idempotency)
 	orderUserID, status, _, err := repository.OrderByID(h.db, orderID)
 	if err != nil || orderUserID == "" {
 		log.Printf("stripe: order %s not found", orderID)
@@ -538,7 +593,7 @@ func (h *Handler) handleCheckoutCompleted(event *WebhookEvent) {
 			code := repository.GenerateTicketCode()
 
 			// V2 QR payload: includes payment_intent_id and event_id for traceability
-			qrPayload := qrcode.GenerateSignedPayloadV2(ticketID, paymentIntentID, ev.ID, []byte(h.cfg.JWTSecret))
+			qrPayload := qrcode.GenerateSignedPayloadV2(ticketID, piID, ev.ID, []byte(h.cfg.JWTSecret))
 
 			err := repository.CreateTicketWithID(
 				h.db, ticketID, code, qrPayload,
@@ -560,22 +615,5 @@ func (h *Handler) handleCheckoutCompleted(event *WebhookEvent) {
 		log.Printf("stripe: confirm order %s error: %v", orderID, err)
 	}
 
-	log.Printf("stripe: order %s confirmed via webhook (session %s, pi %s)", orderID, sessionID, paymentIntentID)
-}
-
-// handlePaymentIntentSucceeded logs payment_intent.succeeded events.
-// The primary flow is via checkout.session.completed; this is secondary confirmation.
-func (h *Handler) handlePaymentIntentSucceeded(event *WebhookEvent) {
-	data := event.Data
-	if data == nil {
-		return
-	}
-
-	obj, ok := data["object"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	piID, _ := obj["id"].(string)
-	log.Printf("stripe: payment_intent.succeeded: %s", piID)
+	log.Printf("stripe: order %s CONFIRMED via payment_intent.succeeded (pi %s)", orderID, piID)
 }
