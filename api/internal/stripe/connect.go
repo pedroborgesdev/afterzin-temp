@@ -115,14 +115,35 @@ func (c *Client) GetAccountStatus(accountID string) (*AccountStatus, error) {
 		AccountID: accountID,
 	}
 
-	// V2 API: check requirements to determine if onboarding is complete
-	if requirements, ok := result["requirements"].(map[string]interface{}); ok {
-		// If currently_due is empty or nil, onboarding is complete
+	// V2 API: when requirements is null, there are no pending requirements → onboarding complete.
+	// When requirements is an object, check if currently_due is empty.
+	requirementsVal, requirementsExists := result["requirements"]
+	if !requirementsExists || requirementsVal == nil {
+		// null or absent → no pending requirements → details submitted
+		status.DetailsSubmitted = true
+	} else if requirements, ok := requirementsVal.(map[string]interface{}); ok {
 		currentlyDue, _ := requirements["currently_due"].([]interface{})
 		status.DetailsSubmitted = len(currentlyDue) == 0
 	}
 
-	// Navigate: configuration → recipient → capabilities → stripe_balance → stripe_transfers → status
+	// V2 API: check applied_configurations to confirm configs are applied
+	hasRecipient := false
+	hasMerchant := false
+	if appliedConfigs, ok := result["applied_configurations"].([]interface{}); ok {
+		for _, c := range appliedConfigs {
+			if s, ok := c.(string); ok {
+				if s == "recipient" {
+					hasRecipient = true
+				}
+				if s == "merchant" {
+					hasMerchant = true
+				}
+			}
+		}
+	}
+	log.Printf("stripe: applied_configurations: recipient=%v, merchant=%v", hasRecipient, hasMerchant)
+
+	// Navigate configuration if present (non-null)
 	if config, ok := result["configuration"].(map[string]interface{}); ok {
 		if recipient, ok := config["recipient"].(map[string]interface{}); ok {
 			if caps, ok := recipient["capabilities"].(map[string]interface{}); ok {
@@ -136,7 +157,6 @@ func (c *Client) GetAccountStatus(accountID string) (*AccountStatus, error) {
 				}
 			}
 		}
-		// Also check merchant capabilities
 		if merchant, ok := config["merchant"].(map[string]interface{}); ok {
 			if caps, ok := merchant["capabilities"].(map[string]interface{}); ok {
 				if cp, ok := caps["card_payments"].(map[string]interface{}); ok {
@@ -147,10 +167,17 @@ func (c *Client) GetAccountStatus(accountID string) (*AccountStatus, error) {
 				}
 			}
 		}
+	} else {
+		// configuration is null — if configs are applied and no requirements, consider transfers active
+		if hasRecipient && hasMerchant && status.DetailsSubmitted {
+			log.Printf("stripe: configuration is null but applied_configurations present and no requirements → treating as active")
+			status.TransfersActive = true
+			status.PayoutsEnabled = true
+		}
 	}
 
-	// Onboarding is complete when transfers are active OR details are fully submitted
-	status.OnboardingComplete = status.TransfersActive || status.DetailsSubmitted
+	// Onboarding is complete when there are no pending requirements
+	status.OnboardingComplete = status.DetailsSubmitted
 
 	return status, nil
 }
