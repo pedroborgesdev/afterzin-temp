@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { graphqlClient } from '@/lib/graphql';
 import { MUTATION_CHECKOUT_PAY } from '@/lib/graphql-operations';
+import { createCheckoutSession } from '@/lib/stripe-api';
 import {
   Dialog,
   DialogContent,
@@ -72,6 +73,22 @@ export function CheckoutModal({
       return;
     }
     setPaymentStatus('processing');
+
+    // Try Stripe Checkout first (PIX via Stripe hosted page)
+    try {
+      const result = await createCheckoutSession(checkoutId);
+      if (result?.url) {
+        // Redirect to Stripe Checkout — payment happens there
+        window.location.href = result.url;
+        return;
+      }
+    } catch (stripeErr) {
+      // Stripe not available (producer not onboarded, or STRIPE_SECRET_KEY not set)
+      // Fall through to demo flow
+      console.warn('Stripe checkout unavailable, using demo flow:', stripeErr);
+    }
+
+    // Fallback: demo payment flow (instant confirmation without real payment)
     try {
       const data = await graphqlClient.request<{
         checkoutPay: { success: boolean; message?: string | null };

@@ -7,6 +7,7 @@ import { useProducerEvents } from '@/hooks/useProducerEvents';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { StripeOnboarding } from '@/components/producer/StripeOnboarding';
 
 const statusLabels: Record<string, string> = {
   DRAFT: 'Rascunho',
@@ -78,6 +79,11 @@ export default function ProducerDashboard() {
             </Button>
           </div>
         </div>
+
+        {/* Stripe Connect onboarding */}
+        <section className="mb-6">
+          <StripeOnboarding />
+        </section>
 
         <section className="space-y-4">
           <h2 className="font-display text-lg font-semibold flex items-center gap-2">

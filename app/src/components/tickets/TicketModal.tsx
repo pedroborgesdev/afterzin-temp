@@ -32,6 +32,12 @@ export function TicketModal({ ticket, isOpen, onClose }: TicketModalProps) {
   const isMobile = useIsMobile();
 
   const qrValue = (ticket.qrCode ?? '').trim();
+  const formatTicketCode = (code: string) => {
+    const trimmed = (code ?? '').trim();
+    if (!trimmed) return '';
+    if (trimmed.length <= 20) return trimmed;
+    return `${trimmed.slice(0, 20)}...`;
+  };
   
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -120,7 +126,9 @@ export function TicketModal({ ticket, isOpen, onClose }: TicketModalProps) {
         {/* Ticket Code */}
         <div className="bg-muted rounded-lg px-3 py-2 mb-4 inline-block">
           <p className="text-[10px] text-muted-foreground">Código</p>
-          <p className="font-mono font-bold text-xs sm:text-sm">{ticket.qrCode}</p>
+          <p className="font-mono font-bold text-xs sm:text-sm" title={ticket.qrCode}>
+            {formatTicketCode(ticket.qrCode)}
+          </p>
         </div>
 
         {/* Holder Info */}

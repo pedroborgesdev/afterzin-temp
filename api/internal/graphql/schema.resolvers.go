@@ -404,14 +404,18 @@ func (r *mutationResolver) ValidateTicket(ctx context.Context, eventID string, q
 	if eventProducerID != prodID {
 		return &model.ValidateTicketResult{Success: false, ErrorCode: strPtr("WRONG_EVENT"), Message: strPtr("ingresso não pertence a este evento ou você não é o produtor")}, nil
 	}
-	// QR "comum": validamos pelo valor salvo em tickets.qr_code.
-	// Compatibilidade: se for um payload assinado (formato antigo), aceitamos sem rejeitar.
-	// (Tickets antigos podem ter sido emitidos com payload assinado.)
+	// QR lookup: try direct DB match first, then V2 signed payload, then V1 signed payload.
 	t, err := repository.TicketByQRCode(r.DB, qrCode)
 	if err != nil || t == nil {
-		if _, sigOK := qrcode.VerifySignedPayload(qrCode, []byte(r.Config.JWTSecret)); sigOK {
-			// payload assinado é o próprio valor persistido (qr_code), então a busca acima já cobriu.
-			// Mantemos o fallback apenas para não quebrar fluxos durante a transição.
+		// Try V2 QR payload: ticketID:paymentIntentID:eventID.signature
+		if ticketID, _, _, sigOK := qrcode.VerifySignedPayloadV2(qrCode, []byte(r.Config.JWTSecret)); sigOK {
+			t, err = repository.TicketByID(r.DB, ticketID)
+		}
+		// Try V1 QR payload: ticketID.signature
+		if err != nil || t == nil {
+			if ticketID, sigOK := qrcode.VerifySignedPayload(qrCode, []byte(r.Config.JWTSecret)); sigOK {
+				t, err = repository.TicketByID(r.DB, ticketID)
+			}
 		}
 	}
 	if err != nil || t == nil {

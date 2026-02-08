@@ -15,6 +15,7 @@ import (
 	"afterzin/api/internal/db"
 	"afterzin/api/internal/graphql"
 	"afterzin/api/internal/middleware"
+	"afterzin/api/internal/stripe"
 )
 
 func main() {
@@ -35,13 +36,32 @@ func main() {
 	}
 
 	graphqlHandler := graphql.NewHandler(sqlite, cfg)
-	handler := middleware.CORS(cfg.CORSOrigins)(middleware.Auth(cfg.JWTSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/graphql" {
-			graphqlHandler.ServeHTTP(w, r)
-			return
-		}
-		http.NotFound(w, r)
-	})))
+
+	// Build HTTP mux with all routes
+	mux := http.NewServeMux()
+	mux.Handle("/graphql", graphqlHandler)
+
+	// Stripe REST endpoints (only registered when STRIPE_SECRET_KEY is set)
+	if cfg.StripeSecretKey != "" {
+		stripeClient := stripe.NewClient(
+			cfg.StripeSecretKey,
+			cfg.StripeWebhookSecret,
+			cfg.StripeAppFee,
+			cfg.BaseURL,
+		)
+		stripeHandler := stripe.NewHandler(stripeClient, sqlite, cfg)
+		mux.HandleFunc("/api/stripe/connect/create-account", stripeHandler.CreateAccount)
+		mux.HandleFunc("/api/stripe/connect/onboarding-link", stripeHandler.CreateOnboardingLink)
+		mux.HandleFunc("/api/stripe/connect/status", stripeHandler.GetStatus)
+		mux.HandleFunc("/api/stripe/connect/pix-key", stripeHandler.UpdatePixKey)
+		mux.HandleFunc("/api/stripe/checkout/create", stripeHandler.CreateCheckoutSession)
+		mux.HandleFunc("/api/stripe/webhook", stripeHandler.HandleWebhook)
+		log.Println("Stripe endpoints registered (Connect + Checkout + Webhook)")
+	} else {
+		log.Println("STRIPE_SECRET_KEY not set — Stripe endpoints disabled")
+	}
+
+	handler := middleware.CORS(cfg.CORSOrigins)(middleware.Auth(cfg.JWTSecret)(mux))
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	httpServer := &http.Server{

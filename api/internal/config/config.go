@@ -7,11 +7,15 @@ import (
 )
 
 type Config struct {
-	Port         int
-	DBPath       string
-	JWTSecret    string
-	Playground   bool
-	CORSOrigins  []string
+	Port                int
+	DBPath              string
+	JWTSecret           string
+	Playground          bool
+	CORSOrigins         []string
+	StripeSecretKey     string
+	StripeWebhookSecret string
+	StripeAppFee        int64  // centavos per ticket (default 500 = R$5.00)
+	BaseURL             string // frontend URL for redirects
 }
 
 func Load() *Config {
@@ -51,11 +55,28 @@ func Load() *Config {
 			corsOrigins = []string{"http://localhost:4040", "http://127.0.0.1:4040"}
 		}
 	}
+	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
+	stripeWebhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+	var stripeAppFee int64 = 500 // R$5.00 default
+	if f := os.Getenv("STRIPE_APP_FEE"); f != "" {
+		if v, err := strconv.ParseInt(f, 10, 64); err == nil && v > 0 {
+			stripeAppFee = v
+		}
+	}
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:5173"
+	}
+
 	return &Config{
-		Port:        port,
-		DBPath:      dbPath,
-		JWTSecret:   jwtSecret,
-		Playground:  playground,
-		CORSOrigins: corsOrigins,
+		Port:                port,
+		DBPath:              dbPath,
+		JWTSecret:           jwtSecret,
+		Playground:          playground,
+		CORSOrigins:         corsOrigins,
+		StripeSecretKey:     stripeSecretKey,
+		StripeWebhookSecret: stripeWebhookSecret,
+		StripeAppFee:        stripeAppFee,
+		BaseURL:             baseURL,
 	}
 }
