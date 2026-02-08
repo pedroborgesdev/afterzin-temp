@@ -1,6 +1,10 @@
 package stripe
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+)
 
 // AccountStatus holds the onboarding status of a Stripe Connect account.
 type AccountStatus struct {
@@ -97,15 +101,25 @@ func (c *Client) CreateAccountLink(accountID, refreshURL, returnURL string) (str
 }
 
 // GetAccountStatus retrieves the onboarding status of a connected account via V2 API.
-// Onboarding is considered complete when stripe_transfers.status == "active".
 func (c *Client) GetAccountStatus(accountID string) (*AccountStatus, error) {
 	result, err := c.v2JSON("GET", "/v2/core/accounts/"+accountID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get account status: %w", err)
 	}
 
+	// Log full response for debugging
+	raw, _ := json.MarshalIndent(result, "", "  ")
+	log.Printf("stripe: GET /v2/core/accounts/%s response:\n%s", accountID, string(raw))
+
 	status := &AccountStatus{
 		AccountID: accountID,
+	}
+
+	// V2 API: check requirements to determine if onboarding is complete
+	if requirements, ok := result["requirements"].(map[string]interface{}); ok {
+		// If currently_due is empty or nil, onboarding is complete
+		currentlyDue, _ := requirements["currently_due"].([]interface{})
+		status.DetailsSubmitted = len(currentlyDue) == 0
 	}
 
 	// Navigate: configuration → recipient → capabilities → stripe_balance → stripe_transfers → status
@@ -115,24 +129,28 @@ func (c *Client) GetAccountStatus(accountID string) (*AccountStatus, error) {
 				if sb, ok := caps["stripe_balance"].(map[string]interface{}); ok {
 					if st, ok := sb["stripe_transfers"].(map[string]interface{}); ok {
 						if s, ok := st["status"].(string); ok {
+							log.Printf("stripe: stripe_transfers.status = %q", s)
 							status.TransfersActive = s == "active"
 						}
 					}
 				}
 			}
 		}
+		// Also check merchant capabilities
+		if merchant, ok := config["merchant"].(map[string]interface{}); ok {
+			if caps, ok := merchant["capabilities"].(map[string]interface{}); ok {
+				if cp, ok := caps["card_payments"].(map[string]interface{}); ok {
+					if s, ok := cp["status"].(string); ok {
+						log.Printf("stripe: card_payments.status = %q", s)
+						status.PayoutsEnabled = s == "active"
+					}
+				}
+			}
+		}
 	}
 
-	// Additional fields from V2 response
-	if ds, ok := result["details_submitted"].(bool); ok {
-		status.DetailsSubmitted = ds
-	}
-	if pe, ok := result["payouts_enabled"].(bool); ok {
-		status.PayoutsEnabled = pe
-	}
-
-	// Onboarding is complete when transfers are active and no pending requirements
-	status.OnboardingComplete = status.TransfersActive
+	// Onboarding is complete when transfers are active OR details are fully submitted
+	status.OnboardingComplete = status.TransfersActive || status.DetailsSubmitted
 
 	return status, nil
 }
