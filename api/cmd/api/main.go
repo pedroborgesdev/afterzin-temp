@@ -16,9 +16,14 @@ import (
 	"afterzin/api/internal/graphql"
 	"afterzin/api/internal/middleware"
 	"afterzin/api/internal/stripe"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file if it exists (ignores error if file is absent)
+	_ = godotenv.Load()
+
 	cfg := config.Load()
 
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0755); err != nil {
