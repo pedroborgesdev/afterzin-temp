@@ -66,6 +66,9 @@ func main() {
 		log.Println("STRIPE_SECRET_KEY not set — Stripe endpoints disabled")
 	}
 
+	fmt.Println(cfg.StripeSecretKey)
+	fmt.Println(cfg.StripeWebhookSecret)
+
 	handler := middleware.CORS(cfg.CORSOrigins)(middleware.Auth(cfg.JWTSecret)(mux))
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)

@@ -33,6 +33,13 @@ func (c *Client) CreateConnectedAccount(displayName, email string) (string, erro
 			},
 		},
 		"configuration": map[string]interface{}{
+			"merchant": map[string]interface{}{
+				"capabilities": map[string]interface{}{
+					"card_payments": map[string]interface{}{
+						"requested": true,
+					},
+				},
+			},
 			"recipient": map[string]interface{}{
 				"capabilities": map[string]interface{}{
 					"stripe_balance": map[string]interface{}{
