@@ -65,7 +65,7 @@ func Load() *Config {
 	}
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:5173"
+		baseURL = "http://localhost:4040"
 	}
 
 	return &Config{
