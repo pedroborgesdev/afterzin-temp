@@ -15,7 +15,7 @@ import (
 	"afterzin/api/internal/db"
 	"afterzin/api/internal/graphql"
 	"afterzin/api/internal/middleware"
-	"afterzin/api/internal/stripe"
+	"afterzin/api/internal/pagarme"
 
 	"github.com/joho/godotenv"
 )
@@ -46,25 +46,24 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/graphql", graphqlHandler)
 
-	// Stripe REST endpoints (only registered when STRIPE_SECRET_KEY is set)
-	if cfg.StripeSecretKey != "" {
-		stripeClient := stripe.NewClient(
-			cfg.StripeSecretKey,
-			cfg.StripeWebhookSecret,
-			cfg.StripeAppFee,
+	// Pagar.me REST endpoints (only registered when PAGARME_API_KEY is set)
+	if cfg.PagarmeAPIKey != "" {
+		pagarmeClient := pagarme.NewClient(
+			cfg.PagarmeAPIKey,
+			cfg.PagarmeWebhookSecret,
+			cfg.PagarmeRecipientID,
+			cfg.PagarmeAppFee,
 			cfg.BaseURL,
 		)
-		stripeHandler := stripe.NewHandler(stripeClient, sqlite, cfg)
-		mux.HandleFunc("/api/stripe/connect/create-account", stripeHandler.CreateAccount)
-		mux.HandleFunc("/api/stripe/connect/onboarding-link", stripeHandler.CreateOnboardingLink)
-		mux.HandleFunc("/api/stripe/connect/status", stripeHandler.GetStatus)
-		mux.HandleFunc("/api/stripe/connect/pix-key", stripeHandler.UpdatePixKey)
-		mux.HandleFunc("/api/stripe/payment/create", stripeHandler.CreatePayment)
-		mux.HandleFunc("/api/stripe/payment/status", stripeHandler.GetPaymentStatus)
-		mux.HandleFunc("/api/stripe/webhook", stripeHandler.HandleWebhook)
-		log.Println("Stripe endpoints registered (Connect + PIX Payment + Webhook)")
+		pagarmeHandler := pagarme.NewHandler(pagarmeClient, sqlite, cfg)
+		mux.HandleFunc("/api/pagarme/recipient/create", pagarmeHandler.CreateRecipient)
+		mux.HandleFunc("/api/pagarme/recipient/status", pagarmeHandler.GetRecipientStatus)
+		mux.HandleFunc("/api/pagarme/payment/create", pagarmeHandler.CreatePayment)
+		mux.HandleFunc("/api/pagarme/payment/status", pagarmeHandler.GetPaymentStatus)
+		mux.HandleFunc("/api/pagarme/webhook", pagarmeHandler.HandleWebhook)
+		log.Println("Pagar.me endpoints registered (Recipient + PIX Payment + Webhook)")
 	} else {
-		log.Println("STRIPE_SECRET_KEY not set — Stripe endpoints disabled")
+		log.Println("PAGARME_API_KEY not set — Pagar.me endpoints disabled")
 	}
 
 	handler := middleware.CORS(cfg.CORSOrigins)(middleware.Auth(cfg.JWTSecret)(mux))

@@ -7,15 +7,16 @@ import (
 )
 
 type Config struct {
-	Port                int
-	DBPath              string
-	JWTSecret           string
-	Playground          bool
-	CORSOrigins         []string
-	StripeSecretKey     string
-	StripeWebhookSecret string
-	StripeAppFee        int64  // centavos per ticket (default 500 = R$5.00)
-	BaseURL             string // frontend URL for redirects
+	Port                 int
+	DBPath               string
+	JWTSecret            string
+	Playground           bool
+	CORSOrigins          []string
+	PagarmeAPIKey        string
+	PagarmeWebhookSecret string
+	PagarmeRecipientID   string // Platform's own recipient ID for split
+	PagarmeAppFee        int64  // centavos per ticket (default 500 = R$5.00)
+	BaseURL              string // frontend URL for redirects
 }
 
 func Load() *Config {
@@ -55,10 +56,11 @@ func Load() *Config {
 			corsOrigins = []string{"http://localhost:4040", "http://127.0.0.1:4040"}
 		}
 	}
-	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
-	stripeWebhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+	stripeSecretKey := os.Getenv("PAGARME_API_KEY")
+	stripeWebhookSecret := os.Getenv("PAGARME_WEBHOOK_SECRET")
+	pagarmeRecipientID := os.Getenv("PAGARME_PLATFORM_RECIPIENT_ID")
 	var stripeAppFee int64 = 500 // R$5.00 default
-	if f := os.Getenv("STRIPE_APP_FEE"); f != "" {
+	if f := os.Getenv("PAGARME_APP_FEE"); f != "" {
 		if v, err := strconv.ParseInt(f, 10, 64); err == nil && v > 0 {
 			stripeAppFee = v
 		}
@@ -69,14 +71,15 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:                port,
-		DBPath:              dbPath,
-		JWTSecret:           jwtSecret,
-		Playground:          playground,
-		CORSOrigins:         corsOrigins,
-		StripeSecretKey:     stripeSecretKey,
-		StripeWebhookSecret: stripeWebhookSecret,
-		StripeAppFee:        stripeAppFee,
-		BaseURL:             baseURL,
+		Port:                 port,
+		DBPath:               dbPath,
+		JWTSecret:            jwtSecret,
+		Playground:           playground,
+		CORSOrigins:          corsOrigins,
+		PagarmeAPIKey:        stripeSecretKey,
+		PagarmeWebhookSecret: stripeWebhookSecret,
+		PagarmeRecipientID:   pagarmeRecipientID,
+		PagarmeAppFee:        stripeAppFee,
+		BaseURL:              baseURL,
 	}
 }

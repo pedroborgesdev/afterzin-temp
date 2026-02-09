@@ -45,13 +45,13 @@ func VerifySignedPayload(payload string, secret []byte) (ticketID string, ok boo
 }
 
 // GenerateSignedPayloadV2 creates a QR code payload containing ticket ID,
-// payment intent ID, and event ID. This links the ticket to its Stripe transaction.
-// Format: ticketID:paymentIntentID:eventID.hmac_signature
-func GenerateSignedPayloadV2(ticketID, paymentIntentID, eventID string, secret []byte) string {
+// charge ID, and event ID. This links the ticket to its payment transaction.
+// Format: ticketID:chargeID:eventID.hmac_signature
+func GenerateSignedPayloadV2(ticketID, chargeID, eventID string, secret []byte) string {
 	if len(secret) == 0 {
 		secret = []byte("default-secret")
 	}
-	data := ticketID + ":" + paymentIntentID + ":" + eventID
+	data := ticketID + ":" + chargeID + ":" + eventID
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(data))
 	sig := mac.Sum(nil)
@@ -59,7 +59,7 @@ func GenerateSignedPayloadV2(ticketID, paymentIntentID, eventID string, secret [
 }
 
 // VerifySignedPayloadV2 verifies a V2 QR code payload and extracts all components.
-func VerifySignedPayloadV2(payload string, secret []byte) (ticketID, paymentIntentID, eventID string, ok bool) {
+func VerifySignedPayloadV2(payload string, secret []byte) (ticketID, chargeID, eventID string, ok bool) {
 	idx := strings.LastIndex(payload, separator)
 	if idx <= 0 || idx >= len(payload)-1 {
 		return "", "", "", false
