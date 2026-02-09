@@ -1,14 +1,12 @@
-import { useState } from 'react';
-import { Copy, Check, Loader2, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Copy, Check, Loader2, X, QrCode, Clock } from 'lucide-react';
 import { Event } from '@/types/events';
 import { TicketSelection } from './TicketSelectionModal';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { graphqlClient } from '@/lib/graphql';
-import { MUTATION_CHECKOUT_PAY } from '@/lib/graphql-operations';
-import { createCheckoutSession } from '@/lib/stripe-api';
+import { createPixPayment, getPaymentStatus, type PixPaymentResult } from '@/lib/pagarme-api';
 import {
   Dialog,
   DialogContent,
@@ -42,9 +40,42 @@ export function CheckoutModal({
 }: CheckoutModalProps) {
   const isMobile = useIsMobile();
   const [copied, setCopied] = useState(false);
-  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'processing' | 'success'>('pending');
+  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'loading' | 'pix' | 'success' | 'error'>('idle');
+  const [pixData, setPixData] = useState<PixPaymentResult | null>(null);
+  const [timeLeft, setTimeLeft] = useState<string>('');
   const { refreshTickets } = useAuth();
   const { toast } = useToast();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup polling on unmount or close
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  // Start countdown timer when PIX data is available
+  useEffect(() => {
+    if (!pixData?.expiresAt) return;
+    const updateTimer = () => {
+      const expiresAtMs = new Date(pixData.expiresAt).getTime();
+      const now = Date.now();
+      const diff = Math.floor((expiresAtMs - now) / 1000);
+      if (diff <= 0) {
+        setTimeLeft('Expirado');
+        if (timerRef.current) clearInterval(timerRef.current);
+        return;
+      }
+      const mins = Math.floor(diff / 60);
+      const secs = diff % 60;
+      setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+    };
+    updateTimer();
+    timerRef.current = setInterval(updateTimer, 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [pixData?.expiresAt]);
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -56,8 +87,9 @@ export function CheckoutModal({
   };
 
   const handleCopyCode = () => {
-    if (checkoutId) {
-      navigator.clipboard.writeText(checkoutId);
+    const code = pixData?.pixQrCode;
+    if (code) {
+      navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
       toast({
@@ -67,53 +99,43 @@ export function CheckoutModal({
     }
   };
 
+  // Start PIX payment flow
   const handlePay = async () => {
     if (!checkoutId) {
       toast({ title: 'Erro', description: 'Checkout não disponível.', variant: 'destructive' });
       return;
     }
-    setPaymentStatus('processing');
+    setPaymentStatus('loading');
 
-    // Try Stripe Checkout first (PIX via Stripe hosted page)
     try {
-      const result = await createCheckoutSession(checkoutId);
-      if (result?.url) {
-        // Redirect to Stripe Checkout — payment happens there
-        window.location.href = result.url;
-        return;
-      }
-    } catch (stripeErr) {
-      // Stripe not available (producer not onboarded, or STRIPE_SECRET_KEY not set)
-      // Fall through to demo flow
-      console.warn('Stripe checkout unavailable, using demo flow:', stripeErr);
-    }
+      const result = await createPixPayment(checkoutId);
+      setPixData(result);
+      setPaymentStatus('pix');
 
-    // Fallback: demo payment flow (instant confirmation without real payment)
-    try {
-      const data = await graphqlClient.request<{
-        checkoutPay: { success: boolean; message?: string | null };
-      }>(MUTATION_CHECKOUT_PAY, { input: { checkoutId } });
-      if (data?.checkoutPay?.success) {
-        setPaymentStatus('success');
-        await refreshTickets();
-        toast({
-          title: 'Pagamento confirmado! 🎉',
-          description: 'Seu ingresso está na Mochila de Tickets.',
-        });
-        setTimeout(() => onSuccess(), 1500);
-      } else {
-        setPaymentStatus('pending');
-        toast({
-          title: 'Erro',
-          description: data?.checkoutPay?.message ?? 'Não foi possível confirmar o pagamento.',
-          variant: 'destructive',
-        });
-      }
-    } catch {
-      setPaymentStatus('pending');
+      // Start polling for payment confirmation (every 3 seconds)
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await getPaymentStatus(checkoutId);
+          if (status.paid) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (timerRef.current) clearInterval(timerRef.current);
+            setPaymentStatus('success');
+            await refreshTickets();
+            toast({
+              title: 'Pagamento confirmado! 🎉',
+              description: 'Seu ingresso está na Mochila de Tickets.',
+            });
+            setTimeout(() => onSuccess(), 1500);
+          }
+        } catch {
+          // Ignore polling errors, keep trying
+        }
+      }, 3000);
+    } catch (err) {
+      setPaymentStatus('error');
       toast({
-        title: 'Erro',
-        description: 'Não foi possível confirmar o pagamento.',
+        title: 'Erro ao gerar PIX',
+        description: err instanceof Error ? err.message : 'Tente novamente.',
         variant: 'destructive',
       });
     }
@@ -124,13 +146,67 @@ export function CheckoutModal({
       {paymentStatus === 'success' ? (
         <div className="text-center py-8 sm:py-10">
           <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-accent flex items-center justify-center mx-auto mb-4">
-            <Check className="w-8 h-8 sm:w-10 h-10 text-primary" />
+            <Check className="w-8 h-8 sm:w-10 sm:h-10 text-primary" />
           </div>
-          <h3 className="text-lg sm:text-xl font-semibold mb-2">Compra realizada!</h3>
+          <h3 className="text-lg sm:text-xl font-semibold mb-2">Pagamento confirmado!</h3>
           <p className="text-muted-foreground text-sm sm:text-base">
             Seu ingresso está na Mochila de Tickets.
           </p>
         </div>
+      ) : paymentStatus === 'pix' && pixData ? (
+        <>
+          {/* QR Code */}
+          <div className="flex flex-col items-center mb-4">
+            {pixData.pixQrCodeUrl ? (
+              <img
+                src={pixData.pixQrCodeUrl}
+                alt="QR Code PIX"
+                className="w-48 h-48 sm:w-56 sm:h-56 rounded-lg border border-border"
+              />
+            ) : (
+              <div className="w-48 h-48 sm:w-56 sm:h-56 rounded-lg border border-border flex items-center justify-center bg-muted">
+                <QrCode className="w-16 h-16 text-muted-foreground" />
+              </div>
+            )}
+            {pixData.expiresAt && (
+              <div className="flex items-center gap-1.5 mt-2 text-sm text-muted-foreground">
+                <Clock className="w-4 h-4" />
+                <span>Expira em: <span className="font-mono font-medium text-foreground">{timeLeft}</span></span>
+              </div>
+            )}
+          </div>
+
+          {/* Copia e Cola */}
+          {pixData.pixQrCode && (
+            <div className="mb-4">
+              <p className="text-sm text-muted-foreground mb-2 text-center">PIX Copia e Cola</p>
+              <button
+                onClick={handleCopyCode}
+                className="w-full flex items-center gap-2 px-4 py-3 bg-muted rounded-xl text-sm hover:bg-accent transition-colors min-h-touch touch-manipulation active:scale-[0.99]"
+              >
+                <span className="font-mono truncate flex-1 text-left text-xs">
+                  {pixData.pixQrCode}
+                </span>
+                {copied ? (
+                  <Check className="w-5 h-5 text-primary shrink-0" />
+                ) : (
+                  <Copy className="w-5 h-5 text-muted-foreground shrink-0" />
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Status indicator */}
+          <div className="flex items-center justify-center gap-2 py-3 mb-4 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
+            <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+            <span className="text-sm text-amber-700 dark:text-amber-400">Aguardando pagamento...</span>
+          </div>
+
+          <p className="text-xs text-muted-foreground text-center">
+            Abra o app do seu banco, escaneie o QR code ou cole o código PIX.
+            O ingresso será liberado automaticamente após a confirmação.
+          </p>
+        </>
       ) : (
         <>
           <div className="bg-muted/50 rounded-xl p-3.5 sm:p-4 mb-4">
@@ -173,39 +249,25 @@ export function CheckoutModal({
             <a href="#" className="text-primary hover:underline">Política de Reembolso</a>.
           </p>
 
-          <div className="text-center mb-4">
-            <p className="text-sm text-muted-foreground mb-3">Código do pedido (PIX)</p>
-            <button
-              onClick={handleCopyCode}
-              className="w-full flex items-center gap-2 px-4 py-3 bg-muted rounded-xl text-sm hover:bg-accent transition-colors min-h-touch touch-manipulation active:scale-[0.99]"
-            >
-              <span className="font-mono truncate flex-1 text-left text-xs">{checkoutId}</span>
-              {copied ? (
-                <Check className="w-5 h-5 text-primary shrink-0" />
-              ) : (
-                <Copy className="w-5 h-5 text-muted-foreground shrink-0" />
-              )}
-            </button>
-          </div>
-
-          <p className="text-xs sm:text-sm text-center text-muted-foreground mb-4">
-            Após o pagamento, o ingresso estará na sua{' '}
-            <span className="text-primary font-medium">Mochila de Tickets</span>.
-          </p>
+          {paymentStatus === 'error' && (
+            <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive text-center">
+              Erro ao gerar PIX. Tente novamente.
+            </div>
+          )}
 
           <Button
             className="w-full"
             size="lg"
             onClick={handlePay}
-            disabled={paymentStatus === 'processing'}
+            disabled={paymentStatus === 'loading'}
           >
-            {paymentStatus === 'processing' ? (
+            {paymentStatus === 'loading' ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Processando...
+                Gerando PIX...
               </>
             ) : (
-              'Confirmar pagamento'
+              'Pagar com PIX'
             )}
           </Button>
         </>
@@ -220,8 +282,8 @@ export function CheckoutModal({
           <DrawerHeader className="border-b border-border px-4 pb-3">
             <div className="flex items-center justify-between">
               <DrawerTitle className="font-display text-xl">
-                {paymentStatus === 'success' ? 'Pagamento Confirmado!' : 'Finalizar Compra'}
-              </DrawerTitle>
+              {paymentStatus === 'success' ? 'Pagamento Confirmado!' : paymentStatus === 'pix' ? 'Pagar com PIX' : 'Finalizar Compra'}
+            </DrawerTitle>
               <DrawerClose asChild>
                 <button className="p-2 hover:bg-accent rounded-lg transition-colors">
                   <X className="w-5 h-5" />
@@ -240,7 +302,7 @@ export function CheckoutModal({
       <DialogContent className="max-w-sm p-0 gap-0">
         <DialogHeader className="p-4 sm:p-6 pb-4">
           <DialogTitle className="font-display text-xl">
-            {paymentStatus === 'success' ? 'Pagamento Confirmado!' : 'Finalizar Compra'}
+            {paymentStatus === 'success' ? 'Pagamento Confirmado!' : paymentStatus === 'pix' ? 'Pagar com PIX' : 'Finalizar Compra'}
           </DialogTitle>
         </DialogHeader>
         {content}

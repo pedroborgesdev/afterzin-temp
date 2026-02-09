@@ -61,14 +61,31 @@ export async function updatePixKey(
   });
 }
 
-// ---------- Checkout ----------
+// ---------- Payment: PIX ----------
 
-/** Creates a Stripe Checkout Session for PIX payment. Returns redirect URL. */
-export async function createCheckoutSession(
+/** PIX Payment result from backend */
+export interface PixPaymentResult {
+  paymentIntentId: string;
+  clientSecret: string;
+  pixQrCode: string;      // URL to QR code image (PNG)
+  pixCopyPaste: string;   // Copia-e-cola string
+  expiresAt: number;      // Unix timestamp
+  status: string;         // requires_action, succeeded, etc.
+}
+
+/** Creates a PIX PaymentIntent for an order. Returns QR code + copia-e-cola. */
+export async function createPixPayment(
   orderId: string,
-): Promise<{ sessionId: string; url: string }> {
-  return fetchWithAuth('/api/stripe/checkout/create', {
+): Promise<PixPaymentResult> {
+  return fetchWithAuth('/api/stripe/payment/create', {
     method: 'POST',
     body: JSON.stringify({ orderId }),
   });
+}
+
+/** Polls payment status for an order. */
+export async function getPaymentStatus(
+  orderId: string,
+): Promise<{ status: string; paid: boolean; paymentIntentId?: string; orderStatus?: string }> {
+  return fetchWithAuth(`/api/stripe/payment/status?orderId=${encodeURIComponent(orderId)}`);
 }

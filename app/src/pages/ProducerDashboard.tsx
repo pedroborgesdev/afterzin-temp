@@ -7,7 +7,7 @@ import { useProducerEvents } from '@/hooks/useProducerEvents';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { StripeOnboarding } from '@/components/producer/StripeOnboarding';
+import { PagarmeOnboarding } from '@/components/producer/PagarmeOnboarding';
 
 const statusLabels: Record<string, string> = {
   DRAFT: 'Rascunho',
@@ -80,9 +80,9 @@ export default function ProducerDashboard() {
           </div>
         </div>
 
-        {/* Stripe Connect onboarding */}
+        {/* Pagar.me onboarding */}
         <section className="mb-6">
-          <StripeOnboarding />
+          <PagarmeOnboarding />
         </section>
 
         <section className="space-y-4">
