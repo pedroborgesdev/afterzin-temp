@@ -42,6 +42,7 @@ func Load() *Config {
 		"http://localhost:3000",
 		"http://127.0.0.1:5173",
 		"http://127.0.0.1:3000",
+		"http://10.0.0.102:4040",
 	}
 	if o := os.Getenv("CORS_ORIGINS"); o != "" {
 		// Comma-separated list, e.g. "http://localhost:5173,http://127.0.0.1:5173"
